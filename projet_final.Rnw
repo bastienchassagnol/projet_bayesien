@@ -1,0 +1,345 @@
+\documentclass[12pt]{article}
+
+%ackages
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[a4paper,left=2cm,right=2cm,top=2cm,bottom=2cm]{geometry}
+\usepackage[french]{babel}
+\usepackage{graphicx}
+\pagestyle{plain}
+\usepackage{fancyhdr}
+\usepackage{fancybox}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{empheq}
+\usepackage{float}
+\usepackage{mathrsfs}
+\usepackage{bigints}
+
+\usepackage{hyphenat}
+\usepackage{listings}
+\usepackage{booktabs}
+
+
+\pagestyle{fancy}
+\fancyhead[C]{\rule{.5\textwidth}{4\baselineskip}}% Add something BIG in the header
+\setlength{\headheight}{63pt}
+\linespread{1.2}
+\setlength{\parindent}{0cm}
+\setlength{\parskip}{1ex plus 0.5ex minus 0.2ex}
+\newcommand{\hsp}{\hspace{20pt}}
+\newcommand{\HRule}{\rule{\linewidth}{0.5mm}}
+\usepackage{fourier} 
+\usepackage{array}
+\usepackage{makecell}
+
+
+\begin{document}
+\SweaveOpts{concordance=TRUE}
+<<options, echo = FALSE>>=
+options(prompt = " ", continue = " ", width = 85)
+@
+
+\begin{titlepage}
+
+  \begin{center}
+
+    %\includegraphics[scale=0.5]{logoInsa.png}~\\[1cm]
+    
+    \vfill
+    \textsc{ \Large Compte rendu de projet }\\[1cm]
+    %\vfill
+    \HRule \\[0.4cm]
+    {\LARGE \textbf{Design d'essai clinique en méta-analyse : risque cardiovasculaire et traitement anti-diabétique}
+\\ [0.2cm] }
+
+ \HRule \\[1cm]
+\vfill
+
+%trouver une image à mettre    \includegraphics[scale=0.2]{pacman.jpg}
+
+%\vfill
+%    \textsc{"Not all things that you learn are taught to you, but many things that you learn you realize you have taught yourself.
+%”\\C. JoyBell}\\[1cm]
+    
+%\vfill
+   
+    \textsc{CHASSAGNOL Bastien, DE NAILLY Paul, PISTER Alexis, PRIN Amaury}\\[1cm]
+\vfill 
+
+    \begin{minipage}{0.4\textwidth}
+      \begin{flushleft} 
+        Bio-informatique et modélisation\\ 
+        Année scolaire : 2018-2019\\
+      \end{flushleft}
+    \end{minipage}
+    \begin{minipage}{0.4\textwidth}
+      \begin{flushright} \large
+        Encadrant : \\Mr \textsc{Fabien SUBTIL}\\
+      \end{flushright}
+    \end{minipage}
+
+  \end{center}
+  
+\end{titlepage}
+
+
+\section{Contexte biologique}
+L'objectif de ce projet est de planifier une étude clinique dans le but de tester, par une étude de non-supériorité, un nouveau traitement anti-diabétique par rapport à un traitement de référence. Afin d'estimer la puissance nécessaire pour réaliser cette étude, nous allons utiliser l'approche bayésienne à partir d'études anciennes qui ont porté sur le traitement de référence. À travers ce projet, l'objectif est d'évaluer l'influence de l'approche bayésienne dans une étude clinique, en particulier sur la manière d'ajouter l'information {\it apriori} dans l'étude. Pour ce projet, nous essaierons de résumer l'information de 5 études précédentes en essayant de modéliser le délai avant un évènement cardiovasculaire. Nous simulerons également des essais cliniques, de diffentes manières, en intégrant ou non l'information {\it apriori}.
+
+\section{Analyse des études antérieures}
+Dans un premier temps, nous avons construit un modèle sous \texttt{Jags} pour estimer le temps moyen d'apparition d'un événement cardiovasculaire (noté ici $\theta$) à partir des 5 études antérieures. On suppose que la moyenne de ce paramètre est globalement la même pour toutes les études (celles-ci ayant recouru au même type de traitement de référence), mais en lui laissant pour chaque étude la possibilité de s'écarter un peu de la moyenne. En effet, selon la prise en charge des patients par l'hôpital, le profil des patients sélectionnés par chaque étude ou encore le fait que chaque étude ne consitue qu'un échantillon de la population globale, on est obligé d'introduire de la variabilité pour chaque expérience. Celle-ci est introduite avec le paramètre $ \sigma$. On a donc recouru à certaines hypothèses simplificatrices pour la construction de notre modèle, en supposant notamment que chaque patient au sein d'une même étude réagissait de la même façon au traitement (pas de variabilité intra groupe). 
+
+ \vspace{2\baselineskip}
+Concrètement, pour chaque patient de chaque étude, nous allons modéliser le temps d'apparition d'un évènement cardiovasculaire grâce à une loi exponentielle. On se sert souvent de cette loi pour déterminer le temps d'apparition d'une maladie puisque le paramètre de cette loi est $\theta$ et son espérance est $ \dfrac{1}{\theta}$, correspondant au temps moyen de l'apparition d'un événement cardiovasculaire. De plus, la loi exponetielle est dite \textbf {sans mémoire}, ce qui signiefie que la probabilité qu'un phénomène se produise après s + t heures sachant qu'il a déjà duré t heures est la même que la probabilité de durer s heures à partir du début du traitement. Elle implique donc une autre hypothèse simplificatrice en supposant que l'état des malades varie de façon constante, et ne dépend pas de ce qui a précédé. Si elle permet de simplifier amplement l'approche du problème, elle peut aussi être constestée, l'état du patient dépendant forcément des antécédents. Une autre hypothèse apportée est l'indépendance de la date d'apparition des événements entre les patients d'une même étude. Celle-ci est normalement vérifiée puisque l'état d'un patient n'influe normalement pas l'état des autres patients, d'autant plus que les maladies cardiovasculaires ne sont pas contagieuses. Ces différentes hypothèses sont indispensables pour la construction de notre modèle, dans lequel on suppose que chaque patient apporte la même quantité d'informations, et constitue une réalisation indépendante et identiquement distribuée de notre loi exponentielle. Une autre difficulté vient du fait que nous ne suivons pas sur une vie entière les patients, puisqu'assez logiquement le temps d'étude est fixé pour une certaine durée. Pour prendre en compte ces individus censurés qui sont majoritaires dans notre étude (96\% des patients), on utilise la fonction jags \texttt{dinterval} qui vaut 0 pour une donnée non censurée et 1 sinon. On cherche ensuite à comparer ces valeurs avec celles estimées par notre modèle. Comme nous ne disposons pas du temps d'étude sur chaque patient, on suppose volontairement ce temps de censure très grand (ici fixé dans notre modèle à 10 000, mais il suffit de le prendre supérieure à la valeur maximale du temps d'étude).Comme le vrai temps d'apparition n'est pas connu, pour tous les patients censurés, on indique à jags qu'on ne connait pas ce temps. Ce modèle peut être représenté par le graphe acyclique suivant:  
+
+
+\begin{figure}[H]
+
+\begin{center}
+\includegraphics{dag_modele1_non_optimise.png} 
+\end{center}
+
+\end{figure}
+
+et sera codé de cette façon dans jags: 
+<<modele_non_optimise>>=
+#Lecture données et variables
+require(rjags)
+data = read.table("dataprior_projet.txt", header=T)
+event=data$event
+time=data$time
+etude=data$etude
+vec = c("a","b","c","d","e")
+etude2 = match(etude,vec)
+censure = 1-event 
+
+#calcul Ti =temps apparition d'un évènement cardiovasculaire et C temps de censure observé
+C = vector(le = length(event))
+C[event==0] = time[event==0]
+C[event==1] = 3
+Ti = vector(le = length(event))
+Ti[event==0] = NA
+Ti[event==1] = time[event==1]
+
+#ecriture du modele sous jags
+ms = "
+model{
+  for(i in 1:5){
+  log_teta[i] ~ dnorm(mu,tau)
+  teta[i]=exp(log_teta[i])
+  }
+
+  for (j in 1:Np){
+  censure[j] ~ dinterval(time[j], C[j])
+  time[j] ~ dexp(teta[etude[j]]) 
+}
+#lois uniformes non informatives
+#ici on tire le temps moyen d'apparition selon une échelle logarithmique, 
+#puisque la loi utilisant ce paramètre est exponentielle. Pour avoir donc
+#une représentation la moins informative possible de ce paramètre, 
+#on utilise une loi uniforme sur son logarithme.
+  tau = 1/(sigma**2)
+  sigma ~ dunif(0,20)
+  mu ~ dunif(-20,10)
+}
+"
+@
+
+<<etude_parametres_modele_basique,echo=False,figure=True>>=
+#Lecture données et variables
+#Codification des données
+data.jags = list(Np=nrow(data), etude=etude2, time = Ti,C=C,censure=censure)
+
+
+#Initialisation des chaines de Markov 
+#Définition des valeurs initiales des noeuds entrants pour chaque chaine
+init_params = list(
+  list(sigma=2, mu=-15),
+  list(sigma=4, mu = 0)
+)
+
+#Simulation des chaines de Markov
+#Fonction qui va vérifier l'intégrité du modèle codé.
+#m = jags.model(file=textConnection(ms),  data = data.jags, inits = init_params,  n.chains = 2)
+#update(m, 3000)
+#mcmc2 <- coda.samples(m, c("mu","sigma"), n.iter = 8000)
+@
+
+
+Ce premier modèle nous donne un intervalle de confiance à 95 \% plus resseré pour la détermination du paramètre $ log(\theta) \in [-4.454,-3.921] \Leftrightarrow \theta \in [0.012,0.020]$. Mais le temps de calcul est très long, ce qui posera problème par la suite pour estimer la puissance du modèle. 
+
+
+
+Ce premier modèle n'étant pas optimisé, alors qu'il est possible de calculer directement à la main une loi de probabilité maximisant la vraisemblance, on a décidé d'en développer un autre s'appuyant sur le \textbf{modèle du zéro trick}. En effet, les statistiques bayésiennes s'appuient sur la formule suivante: $$ P(y|\theta)= \dfrac {P(\theta|y)P(y)}{P(\theta)}\Leftrightarrow P(y|\theta)\propto P(\theta|y)\times P(y)$$ avec dans notre cas $ P(y)$ qui représente la distribution a priori de notre paramètre (ici suivant une loi uniforme) et $ P(\theta|y)$ qui représente la vraisemblance de nos données (on cherche à déterminer une distribution collant au plus près de nos données). 
+
+Pour une loi exponentielle, la vraisemblance se calcule de la façon suivante: 
+$$L(x_{1},...x_{n},\theta)= \prod_{i=1}^{n}\theta \exp ^{-\theta x_{i}} \Leftrightarrow log(L(x_{1},...x_{n},\theta))= n(event=1)log(\theta) -\theta \times \sum_{i=1}^{n}x_{i}$$, avec ici n le nombre de personnes par étude, et subtilité introduite par la censure, la somme des temps correspond pour chaque patient soit à son temps d'observation total si censuré, soit au temps d'apparition de la maladie si non censuré. On a supposé encore ici que chaque réalisation était indépendante et identiquement distribué, sinon ce calcul ne fait pas sens. Or, on peut réinterpréter cette vraisemblance comme une probabilité globale combinant les probabilités individuelles de chaque individu d'apparition de la maladie. De plus, la loi de Poisson: $$ p(k)=P(X=k)=\dfrac{\lambda ^{k} \exp ^{-\lambda}}{k!}$$ a pour paramètre $ \lambda$ qui correspond au nombre d'événements attendus pour un certain laps de temps.Si on associe le nombre de ces évènements au nombre de patients malades au moment de la censure, alors on peut considérer que la probalité qu'aucun patient ne soit malade au sein d'une étude: $(P(X=0)=\exp^{-\lambda})$ suit une loi de Poisson de paramètre $ \lambda$ égale à moins la vraisemblance déterminée précédemment.En prenant un autre point de vue, on peut assimiler en discret cette expérience à une loi binomiale de paramètres (p,n) avec $p=\dfrac{Tobs}{Ttotal}$ la probabilité pour chaque chaque patient qu'il développe une maladie avant la fin de la censure, et n le nombre de patients total. Le paramètre $\lambda$ est égale à $ p\times n$ et aussi égale à l'espérance de la loi de Poisson. Or on attend bien en moyenne $n\times \dfrac {Tobs}{Ttotal} $ ou autrement dit le nombre total de patients multiplié par la probabilité pour chaque patient d'être malade au moment de la censure (supposé être égal pour chacun). Et la vraisemblance ne fait rien que représenter cette distribution. En voici le DAG résumé: 
+
+\begin{figure}[H]
+
+\begin{center}
+\includegraphics{modele_zero_trick.png} 
+\end{center}
+
+\end{figure}
+
+
+
+Et son codage sous R:
+<<>>=
+#Nombre de patients par étude
+n1 = tapply(event,etude,function(x) {sum(x)})
+##somme des temps(censure ou apparition) par étude
+sum_ti = tapply(time,etude,function(x) {sum(x)})
+zero = rep(0,5)
+
+ms_zerotrick = " 
+model{
+C = 10000
+for(i in 1:nb_etude){
+
+zero[i] ~ dpois(-logvrai[i] +C)
+logvrai[i] <- n1[i]*log(teta[i]) - teta[i]*sum_ti[i]
+
+logteta[i] ~ dnorm(mu,tau)
+teta[i] = exp(logteta[i])
+}
+
+tau = 1/(sigma**2)
+sigma ~ dunif(0,20)
+mu ~ dunif(-20,10)
+}
+"
+@
+
+
+Cette méthode présente l'avantage de prendre en compte le cas spécifique de la censure, tout en nous évitant de prendre une valeur fixée pour la vraisemblance. On aurait en effet pu construire un modèle dans lequel on a une estimation de $ \theta$ correspondant directement au maximum de vraisemblance, mais dans ce cas, on n'est plus dans un cadre bayésien mais inférentiel. Par rapport à la méthode précédente, elle est aussi plus stable et indépendante du choix des paramètres initiaux.  Comme on peut le voir sur les graphiques ci dessous, le critère de Gelman et Rubin, ou \textbf{indice de réduction de la variance}, calculé pour chaque paramètre comme rapport entre la variance globale sur la variance intra chaînes, indique une bien meilleure convergence de notre chaîne, même pour des vlaurs plus faibles d'itérations avec notre nouvelle méthode.  Il doit notamment être proche de 1 puisque la variance inter-chaîne doit être négligeable par rapport à la variance intra-chaîne. Numériquement, on constate qu'il est de 1.07 contre 1 pour le modèle zéro-trick; graphiquement, on observe une convergence plus rapide autour de 1, et ce dès les premières itérations avec le modèle zéro-trick. De plus, l'autocorrélation est plus faible avec le modèle zéro-trick, et surtout peut être réglé avec un décalage ou \textbf {thin} de 4 (signifiant que l'on ne conserve qu'une valeur sur quatre pour l'estimation des paramètres finaux).On peut notamment le voir avec le graphe d'autocorrélation, mais surtout la fonction raftery qui indique à la fois le nombre minimum d'itérations à réaliser pour suffisament converger, la taille efficace ou limite inférieure(en enlevant les données trop corrélés) et le facteur de dépendance à appliquer. 
+
+
+<<echo=False>>=
+#Codification des données
+data.jags = list(zero=zero,n1=n1,sum_ti=sum_ti,nb_etude=5)
+
+
+#Initialisation des chaines de Markov 
+#Définition des valeurs initiales des noeuds entrants pour chaque chaine
+init_params = list(
+  list(sigma=2, mu=-15),
+  list(sigma=4, mu = 0),
+  list(sigma=6, mu =5)
+)
+
+#Simulation des chaines de Markov
+#Fonction qui va vérifier l'intégrité du modèle codé.
+m_1 = jags.model(file=textConnection(ms_zerotrick),
+                 data = data.jags,
+                 inits = init_params,
+                 n.chains = 3)
+
+
+update(m_1, 3000)
+mcmc1 <- coda.samples(m_1, c("mu","sigma"), n.iter = 8000)
+@
+
+<<plot_comparaison,echo=False,fig=True>>=
+par(mfrow = c(1, 2))
+require (lattice)
+#densityplot(mcmc2)
+densityplot(mcmc1)
+@
+
+<<autocorrelation_comparaison,echo=False,fig=True>>=
+par(mfrow = c(1, 2))
+#autocorr.plot(mcmc2)
+autocorr.plot(mcmc1)
+#raftery.diag(mcmc2)
+raftery.diag(mcmc1)
+summary(mcmc1)
+@
+
+
+
+
+<<echo=False>>=
+update(m_1, 3000)
+mcmc1 <- coda.samples(m_1, c("mu","sigma"), n.iter = 16000,thin=4)
+par(mfrow = c(1, 1))
+print("autocorrélation après application d'un décalage de 4")
+autocorr.plot(mcmc1)
+
+@
+
+
+On peut aussi effectuer d'autres types de calcul, comme la détermination du temps moyen d'apparition d'un événement cardiovasculaire égale à $ \dfrac {1}{\theta}$. Pour cela, puisque les valeurs de la chaine mcmc correspondent à la distribution réelle de $\theta$, il suffit de calculer la variable notre moyenne pour chaque valeur de notre chaîne, puis de déterminer un quantile pour avoir un intervalle de confiance à 95\%. On suit le même raisonnement pour obtenir une estimation (médiane de la distribution) de $ \sigma$ et $\theta$. 
+
+<<>>=
+mcmtot1=as.data.frame(as.matrix(mcmc1))
+mu_simule=mcmtot1[,"mu"]
+#estimation de log theta moyen
+mu_mediane=quantile(mu_simule,probs=0.5) 
+#intervalle de confiance de theta
+distribution_theta=exp(mu_simule)
+print(quantile(distribution_theta,probs=c(0.025,0.975)))
+#intervalle de confiance de 1/theta
+distribution_temps_moyen=1/distribution_theta
+print(quantile(distribution_temps_moyen,probs=c(0.025,0.5,0.975)))
+#intervalle de sigma moyen
+sigma_simule=mcmtot1[,"sigma"]
+print(quantile(sigma_simule,probs=c(0.025,0.975)))
+@
+Ainsi, en moyenne, le patient va développer la maladie cardiovasculaire en 66 ans. Cette estimation montre ici bien l'importance de la prise en compte de la censure (nombreuses données manquantes), mais aussi l'utopie de considérer avoir réellement uen distribution complète des valeurs du paramètre en poursuivant l'étude, puisque de toute façon nombre de patients seront déjà morts avant même de développer la maladie.  
+
+On peut de plus comparer l'information apportée à priori avec l'information apportée par les données (ici volontairement très faible). On peut voir ci dessous que les données sont très informatives et permettent de resserrer très nettement les lois
+a priori. Pour dessiner les lois à prioro, 2 possibilités s'offrent à nous: on peut décider de faire tourner le modèle à vide (mais la fonction density a tendance à ne pas représenter correctement les distribtions uniformes), ou plus simple dans le cas d'une loi uniforme tracer la droite d'équation $ y=\dfrac {1}{b-a}$, avec (b-a) les bornes de défintion de notre loi.
+<<fig=True,echo=False>>=
+par(mfrow = c(1, 2))
+
+hist(mcmtot1[,"mu"], main = "Apport des données pour la distribution de logtheta", xlab = names(mcmtot1)[1], freq = FALSE,font.main=4,cex.main=0.8)
+abline(h=1/30, col = "blue", lwd = 2)
+hist(mcmtot1[,"sigma"], main = "Apport des données pour la distribution de sigma", xlab = names(mcmtot1)[2], freq = FALSE,font.main=4,cex.main=0.9)
+abline(h=1/20, col = "blue", lwd = 2)
+@
+
+
+Enfin, une dernière possibilité est d'utiliser la fonction diffdic pour comparer l’ajustement aux données avec le critère DIC (Deviance Information Criterion), notamment pour déterminer le modèle le plus ajusté aux données, tout en évitant le "overfitting" car prenant en compte le nombre de paramètres nécessaires pour faire tourner le modèle. Voici le code qui permet sur notre exemple de calculer le DIC classique sur 2000 itérations. Plus le DIC est faible, plus le modèle est ajusté aux données pondéré par le nombre d eparamètres sélectionnés. 
+<<>>=
+#dic_ancien=dic.samples(m, n.iter = 2000,thin=4)
+dic_nouveau=dic.samples(m_1, n.iter = 16000,thin=4)
+print(dic_nouveau)
+#diffdic(dic_ancien,dic_nouveau)
+@
+
+En conclusion, que ce soit par la rapidité des calculs ou par la mesure de qualité des résultats obtenus, nous allons nour concentrer sur le modèle zero trick pour le reste du projet. 
+
+\section{Simulation d'une expérience}
+Dans cette partie, nous avons simulé les résultats d'une nouvelle étude en incluant n  patients pour chaque bras de traitement : un expérimental et un de référence. Une censure administrative à 3 ans est considérée à partir du premier individu inséré dans l'étude. Pour être au plus proche de la réalité, on suppose que l'intégration des 200 patients s'effectue de façon aléatoire entre les 2 bras de traitement, et que leur arrivée est échelonnée uniformément sur la première année. Ensuite, au bout des 3 années de suivi, tous les patients ayant développé une maladie cardiovasculaire sont considérés comme positifs (événement 1), leur temps étant celui de l'incubation de la maladie depuis leur entrée à l'hôpital. Pour les autres, ils sont considérés comme censurés (événement 0), et le temps indiqué est alors celui de l'observation totale sur l'individu (temps censure -date entrée).\\
+De plus, pour une étude considérée,tous les patients sont générés à partir du même theta tirés de la loi normale de paramètres $ \mu \sigma$ déterminés à partir de l'estimation médiane de ces paramètres dans l'étude globale antérieure. Ainsi, comme auparavant, on suppose ce dernier constant pour une population donnée, supposant ainsi que le choix des patients et la qualité des traitements fournis est homogène dans un même hôpital. Le $ \sigma$ est encore ici présent, mais pour indiquer une variabilité possible entre des études différentes, et non au sein d'une même population. Ce choix peut poser problème:ainsi, si le theta est biaisé dès le départ, même en augmentant le nombre de patients, on n’aura une estimation plus précise mais jamais juste: on sera ainsi peut-être plus précis autour d’une valeur qui est « fausse ».\\
+Toutefois, ce qui va nous intéresser plus particulièrement ici est la capacité à distinguer une différence significative entre le $ \theta_{exp} $ et le $ \theta_{ref}$, mesure donnée par le hazard ratio: $ HR= \dfrac{\theta_{exp}}{\theta_{ref}}$. Ainsi, on suppose que $ \theta$ est similaire entre les deux études (puisque le recrutement est similaire), la seule différence étant porté par une éventuelle variation du hazard ratio lié à l'effet supplémentaire ajouté par le traitement expérimental. On distingue deux cas :
+\begin {itemize}
+\item Sous $ H_{0}$, on suppose que les différences entre les deux modèles sont significatives. ce seuil est considéré comme tel si le hazard ratio est supérieure ou égale à 1.3. Dans ce cas, on conclut systématiquement que la différence de développement de maladies est signficative entre les deux traitements. On teste alors: $$ HR=1.3$$.
+\item Sous $ H_{1}$, on suppose que les différences entre les deux modèles ne sont pas significatives. Dans ce cas, Hr doit être inférieure à 1.3, ce qui revient à déterminer la probabilité que $$ HR \leq 1.3$$. Mais pour le calcul de puissance, il est nécessaire de fixer une valeur de HR bien définie (ici on prend un HR de 1). Il serait éventuellement possible de considèrer une petite incertitude sur la valeur attendue sous H1 ;mais pour des soucis de simplification, on calculera cette puissance en supposant que les deux bras de traitement ont le même $\theta $, et donc que HR est égale à un. 
+\end{itemize}
+
+
+
+\textcolor{blue}{Comparaison modèle hiérarchique / modèle classique} \\
+Ce que j'ai compris : on utilise les données (theta) des 5 premières études pour affiner la distribution a posteriori que l'on va obtenir à partir de la simulation construite (qui simule une 6ème étude). A partir de cette 6ème étude (que l'on répète $n$ fois), on génère des fréquences de taux d'apparition de la maladie dans les 2 traitements ($f_{ref}$ et $f_{exp}$ que l'on va obtenir $n$ fois). Ensuite, on utilise ces frequences pour calculer les HR :
+$$
+\theta[f_{ref}] \\
+\theta[f_{exp}] = \theta[f_{ref}] \times HR
+$$
+On estime alors $HR$. Ensuite, en sachant si on était sous $H0$ ou $H1$, on peut alors comparer la valeur de HR à 1 (dans le cas $H1$) ou 1.3 (dans le cas $H0$) et estimer la puissance du test (1-freq de HR au-dessus de 1.3).
+
+\section{Puissance et risque $\alpha$}
+
+En augmentant le nombre de patients, on arrive à être plus précis (donc plus puissant) mais on risque d'avoir du biais avec une estimation qui peut être fausse.
+\section{Proximité entre les études}
+
+
+
+
+
+
+
+\end{document}
