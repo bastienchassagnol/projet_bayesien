@@ -322,24 +322,476 @@ Toutefois, ce qui va nous intéresser plus particulièrement ici est la capacit�
 \end{itemize}
 
 
+\section {Description du modèle hiérarchique et du modèle classique}
+Une fois différentes siumlations lancées (dont on peut faire varier l'hypothèse sous jacente, le nombre de patients dans chaque bras de traitement ou encore l'écart type), on va chercher à retrouver la valeur du hazard ratio, et surtout à déterminer un intervalle de confiance de cette valeur. 
 
-\textcolor{blue}{Comparaison modèle hiérarchique / modèle classique} \\
-Ce que j'ai compris : on utilise les données (theta) des 5 premières études pour affiner la distribution a posteriori que l'on va obtenir à partir de la simulation construite (qui simule une 6ème étude). A partir de cette 6ème étude (que l'on répète $n$ fois), on génère des fréquences de taux d'apparition de la maladie dans les 2 traitements ($f_{ref}$ et $f_{exp}$ que l'on va obtenir $n$ fois). Ensuite, on utilise ces frequences pour calculer les HR :
-$$
-\theta[f_{ref}] \\
-\theta[f_{exp}] = \theta[f_{ref}] \times HR
-$$
-On estime alors $HR$. Ensuite, en sachant si on était sous $H0$ ou $H1$, on peut alors comparer la valeur de HR à 1 (dans le cas $H1$) ou 1.3 (dans le cas $H0$) et estimer la puissance du test (1-freq de HR au-dessus de 1.3).
+\begin {itemize}
+\item \textbf{Modèle hiérarchique} Deux possibilités nous sont sont offertes: soit on n'utilise pas les données à priori ( utilisation des lois vaguement informatives) en considérant que le temps moyen d'incidence (paramètre $ \theta $) est similaire pour les deux études et seule la vriation du hazard ratio va expliquer les différences d'effectifs constatés entre les deux groupes. En effet, si on a suivi une randomisation correcte de l'échantillon de départ, nous sommes normalement en présence de deux groupes homogènes entre les deux bras de traitement. Ou on peut aussi utiliser les données de l'ensemble des 6 études (les 5 études précédentes ajoutés à notre étude personelle), en ajoutant une variable indiquant s'il s'agit d'un traitement expérimental ou de référence. Pour calculer HR, on suppose que :$$\theta[f_{exp}] = \theta[f_{ref}] \times HR$$.
+\item \textbf{Modèle non hiérarchique} Dans ce cas, on intégre directement les études antérieures dans la distribution à priori de $ log(\theta)$ qui va donc suivre une loi normale de paramètre $ \mu$ et $\sigma$. 
+\end{itemize}
 
-\section{Puissance et risque $\alpha$}
+Voici les deux DAGs correspondant à ces deux modèles:
 
-En augmentant le nombre de patients, on arrive à être plus précis (donc plus puissant) mais on risque d'avoir du biais avec une estimation qui peut être fausse.
-\section{Proximité entre les études}
+\begin{figure}[H]
+
+\begin{center}
+\includegraphics{modele_non_hierarchique.png} 
+\end{center}
+
+\end{figure}
+
+
+\begin{figure}[H]
+
+\begin{center}
+\includegraphics{modele_hierarchique.png} 
+\end{center}
+
+\end{figure}
+
+Suite à ces simulations, on peut réaliser différentes études pour comparer ou justifier la validité d'un modèle. On peut ainsi récupérer les chaînes MCMC, afin de simuler la distribution prédictive des données et visualiser la qualité d’ajustement du modèle aux données, en comparant les valeurs prédites (issues de la distribution a posteriori) aux valeurs observées.
+Ci-dessous, on compare les intervalles de crédibilité du nombre de patients attendus à la censure en fonction du bras de traitement, que l'on va comparer avec les données observées. Pour cela, on concatène les informations de 5 simulations réalisées sous $ H_{0}$. 
+
+<<echo=FALSE>>=
+simulation_clinique <- function(h0=FALSE,sigma=0.2,mu=mu_mediane,n=100,temps_administratif=3.0) {
+  
+  #si on est sous h0, on suppose que les traitements ont un impact significatif sur le hazard ratio
+  #de 1.3 sinon pas d'impact, ce qui est modelise par une meme probabilite de taux d'evenement
+  if (h0) {
+    mu_reference=exp(rnorm(1,mu,sd=0.2))
+    mu_experience=mu_reference*1.3
+    
+  }
+  else {
+    #tirage du taux moyen d'apparition d'evenements=parametre de la loi exponentielle
+    mu_reference=exp(rnorm(1,mean=mu,sd=0.2))
+    mu_experience=mu_reference
+  }
+
+  
+  #tirage de l'entree des patients dans l'etude au cours de la première annee
+  entree_reference=runif(n,min=0,max=1)
+  entree_experimental=runif(n,min=0,max=1)
+  
+  #debut etude 
+  debut_etude=min(c(entree_reference,entree_experimental))
+  fin_etude=debut_etude+temps_administratif
+ 
+  
+  
+  #simulation loi exponentielle de parametre exponentielle de mu
+  evenement_reference=entree_reference+rexp(n,mu_reference)
+  evenement_experimental=entree_experimental+rexp(n,mu_experience)
+
+  #creation du data frame type de jeu de données
+  #0 pour experimental et 1 pour ancien traitement
+  data<- data.frame(etude=c(rep("fancien",n),rep("fnew",n)),time=c(evenement_reference,evenement_experimental),event=rep(0,2*n),bras_traitement=c(rep(0,n),rep(1,n)),temps_entree=c(entree_reference,entree_experimental),stringsAsFactors = FALSE)
+  
+
+ #mise a jour des vecteurs d'evenement (0 si censuré, 1 sinon)
+  data$event[data$time<=fin_etude] = 1
+ 
+  
+  #mise a jour des temps sur la base du data source
+  #temps=temps-temps_entree si evenement, sinon temps_administratif+debut inclusion=duree totale etude-temps d'introduction correspondant ainsi au temps d'observation
+  data$time[data$event==0]=fin_etude-data$temps_entree[data$event==0]
+  data$time[data$event==1]=data$time[ data$event==1]-data$temps_entree[ data$event==1]
+ 
+  
+ 
+  return(data[1:4])
+}
+@
+
+<<echo=FALSE>>=
+modele_hierarchique<-function(nb_personne_par_simulation=20000,h0=FALSE,a_priori=NULL,sigma=0.2,type="hazard_ratio",a_vide=FALSE) {
+  
+  if (!is.null(a_priori)) {
+    #on concatene nos deux tables
+    bras_temp=data.frame(bras_traitement=rep(0,nrow(a_priori)), stringsAsFactors = FALSE)
+    a_priori=cbind(a_priori,bras_temp)
+  }
+ 
+    donnne_par_simulation=simulation_clinique(h0=h0,sigma=sigma,n=nb_personne_par_simulation)
+    print(nrow(donnne_par_simulation))
+  if (is.null(a_priori)) {
+      #on repete notre modele pour chaque simulation
+      effectif_bras_traitement=tapply(donnne_par_simulation$event,donnne_par_simulation$etude,function(x) {sum(x)})
+      sum_ti = tapply(donnne_par_simulation$time,donnne_par_simulation$etude,function(x) {sum(x)})
+      dcomplet <- list( sum_ti=sum_ti,effectif_par_experience=effectif_bras_traitement, zero=c(0,0),sigma=sigma,nb_etude=2,type_traitement=c(0,1),indice=c(1,1))
+      if (a_vide) {
+        dcomplet <- list( sum_ti=sum_ti,effectif_par_experience=effectif_bras_traitement,sigma=sigma,nb_etude=2,type_traitement=c(0,1),indice=c(1,1))
+      }
+      
+      
+    }
+   else {
+     
+     
+     data_complete=rbind(a_priori,donnne_par_simulation)
+     effectif_par_experience=tapply(data_complete$event,data_complete$etude,function(x) {sum(x)})
+     sum_ti = tapply(data_complete$time,data_complete$etude,function(x) {sum(x)})
+     dcomplet <- list( sum_ti=sum_ti,effectif_par_experience=effectif_par_experience, zero=rep(0,7),sigma=sigma,nb_etude=7,type_traitement=c(rep(0,6),1),indice=c(seq(1,6),6))
+     if (a_vide) {
+       dcomplet <- list( sum_ti=sum_ti,effectif_par_experience=effectif_par_experience,sigma=sigma,nb_etude=7,type_traitement=c(rep(0,6),1),indice=c(seq(1,6),6))
+     }
+    
+   }
+
+      ms3 = "
+      model{
+     C = 10000
+     for(i in 1:nb_etude){
+      temp[i]~dnorm(mu,tau)
+      logteta[i]=temp[i]*(1-type_traitement[i])+temp[indice[i]]*type_traitement[i]
+     zero[i] ~ dpois(-logvrai[i] + C)
+     teta[i]=exp(logteta[i])*hazard_ratio*type_traitement[i] + exp(logteta[i])*(1-type_traitement[i])
+     logvrai[i] =effectif_par_experience[i]*log(teta[i]) - teta[i]*sum_ti[i]
+     }
+     #lois a priori mais avec sigma fixee
+     #on ne cherche pas a estimer la variabilite intra etude, on la suppose egale a 0.2 aussi
+     tau = 1/(sigma**2)
+     mu ~ dunif(-20,10)
+     
+     
+     log_hazard_ratio~dunif(-10,10)
+     hazard_ratio =exp(log_hazard_ratio)
+     
+   }
+     "
+    ini <- list(list( mu=5,log_hazard_ratio=-5),list(mu=-5,log_hazard_ratio=5),list(mu=2,log_hazard_ratio=-7))
+    m3<-jags.model(file = textConnection(ms3), data = dcomplet, inits = ini, n.chains = 3,quiet=TRUE)
+    update(m3, 3000)
+    mcmc3 <- coda.samples(m3, type, n.iter = 20000, thin = 5)
+    
+    mcmtot1=as.data.frame(as.matrix(mcmc3))
+  return(mcmtot1)
+}
+
+
+@
+
+<<echo=FALSE>>=
+modele_non_hierarchique<-function(nb_personne_par_simulation=100000,h0=FALSE,sigma=0.2,mu=mu_mediane,a_priori=NULL,type="hazard_ratio",a_vide=FALSE) {
+  
+    #on repete notre modele pour chaque simulation
+    donnne_par_simulation=simulation_clinique(h0=h0,sigma=sigma,n=nb_personne_par_simulation)
+    n1=tapply(donnne_par_simulation$event,donnne_par_simulation$etude,function(x) {sum(x==1)})
+    sum_ti = tapply(donnne_par_simulation$time,donnne_par_simulation$etude,function(x) {sum(x)})
+    dcomplet <- list( sum_ti=sum_ti,n1=n1, nb_etude=2, zero=c(0,0),sigma=sigma,mu=mu_mediane,type_etude=c(1,0))
+    if (a_vide) {
+      dcomplet <- list( sum_ti=sum_ti,n1=n1, nb_etude=2,sigma=sigma,mu=mu_mediane,type_etude=c(1,0))
+    }
+    
+  
+  ms_zerotrick_nonhierarchical_simulation = "
+  model{
+  C = 10000
+  for(i in 1:nb_etude){
+  zero[i] ~ dpois(-logvrai[i] + C)
+  logvrai[i] =n1[i]*log(teta[i]) - teta[i]*sum_ti[i]
+  teta[i] = exp(logteta)*type_etude[i]+exp(logteta)*(1-type_etude[i])*hazard_ratio
+  }
+  #lois a priori
+  tau = 1/(sigma**2)
+  logteta~dnorm(mu,tau)
+
+  log_hazard_ratio~dunif(-10,10)
+  hazard_ratio =exp(log_hazard_ratio)
+  }
+  "
+
+ini <- list(list( logteta=-15,log_hazard_ratio=-5),list(logteta=0,log_hazard_ratio=-3),list(logteta =5,log_hazard_ratio=4))
+m3<-jags.model(file = textConnection(ms_zerotrick_nonhierarchical_simulation), data = dcomplet, inits = ini, n.chains = 3,quiet=TRUE)
+update(m3, 3000)
+mcmc3 <- coda.samples(m3, c(type), n.iter = 20000, thin = 5)
+mcmtot1=as.data.frame(as.matrix(mcmc3))
+  
+  return(mcmtot1)
+}
+
+
+@
+
+
+
+<<comparaison_modele,echo=False>>=
+#####################calcul puissance par simulation########
+creation_table_puissance <- function(fonction=modele_hierarchique,nb_personne_par_simulation=1000,sigma=0.2,mu=mu_mediane,nb_simulations=4,a_priori=NULL) {
+  
+  #test sous H0
+  for (i in seq (nb_simulations)) {
+    simulation=fonction(nb_personne_par_simulation=nb_personne_par_simulation,h0=TRUE,a_priori=data) 
+    if (i==1) {
+      hazard_ratio_simule=simulation
+    }
+    else {
+      hazard_ratio_simule=cbind(hazard_ratio_simule,simulation)
+    }
+  }
+  
+  #recuperation du quantile à 95 % pour chaque colonne
+  quantile_95_H0=apply(hazard_ratio_simulation,2,function(x) {quantile(x,probs=0.95)})
+  #determination d'un intervalle de confiance
+  largeur_intervalle_confiance_H0=log(apply(hazard_ratio_simulation,2,function(x) {quantile(x,probs=0.975)}))-log(apply(hazard_ratio_simulation,2,function(x) {quantile(x,probs=0.025)}))
+  precision_H0=mean(largeur_intervalle_confiance_H0)
+  #determination du biais, sous H0, c'est le log ecart entre le hazard ratio estime et le hazard ratio prevu (ici 1.3)
+  biais_introduit_H0=log(hazard_ratio_simulation/1.3) #revient a appliquer pour chauqe element de la mtrice l'operation log(HR)-log(Hrprevu)=log(HR/HRprevu)
+  quantile_biais_h0=apply(biais_introduit_H0,2,function(x) {quantile(x,probs=0.5)})
+  moyenne_biais_H0=mean(quantile_biais_h0)
+  false_negatif=sum(quantile_95_H0<1.3)
+  true_positif=sum(quantile_95_H0>1.3)
+  
+ 
+  
+  
+  #test sous H1
+  for (i in seq (nb_simulations)) {
+    simulation=fonction(nb_personne_par_simulation=nb_personne_par_simulation,h0=FALSE,a_priori=data) 
+    if (i==1) {
+      hazard_ratio_simulation2=simulation
+    }
+    else {
+      hazard_ratio_simulation2=cbind(hazard_ratio_simulation2,simulation)
+    }
+  }
+  #recuperation du quantile à 95 % pour chaque colone
+  quantile_95_H1=apply(hazard_ratio_simulation2,2,function(x) {quantile(x,probs=0.95)})
+  #determination precision H1
+  largeur_intervalle_confiance_H1=log(apply(hazard_ratio_simulation2,2,function(x) {quantile(x,probs=0.975)}))-log(apply(hazard_ratio_simulation2,2,function(x) {quantile(x,probs=0.025)}))
+  precision_H1=mean(largeur_intervalle_confiance_H1)
+  #determination du biais, sous H1 (revient a calculer le log car log(1)=0)
+  biais_introduit_H1=log(hazard_ratio_simulation2) #revient a appliquer pour chauqe element de la mtrice l'operation log(HR)-log(Hrprevu)=log(HR/HRprevu)
+  quantile_biais_h1=apply(biais_introduit_H1,2,function(x) {quantile(x,probs=0.5)})
+  moyenne_biais_H1=mean(quantile_biais_h1)
+  true_negative=sum(quantile_95_H1<1.3)
+  false_positive=sum(quantile_95_H1>1.3)
+  
+  
+  matrice_globale=matrix(data = c(true_positif,false_negatif,false_positive,true_negative),nrow=2,ncol=2,dimnames = list(c("H0 predits","H1 predits"),c("H0 reels","H1 reels")))
+  table_contingence=as.table(matrice_globale)
+  
+  #accuracy mesure le nombre total de bonnes predictions sur le nombre total d'observations
+  accuracy=(true_negative+true_positif)/(nb_simulations*2)
+  
+  #precision donne le pourcentage de vrais bonnes détections parmi les détections postives détectées par notre modele d'apprentissage
+  precision=true_positif/(true_positif+false_positive)
+  
+  #sensibilite mesure la probabilite que l'on conclut à un HR significatif si HR est reellement significatif
+  sensibilite=true_positif/(true_positif+false_negatif)
+  
+  #specificite mesure la probabilite de conclure a une egalite de l'effet des traitements alors qu'effectivement les traitements
+  #ont le meme effet sur le taux d'incidence de maladies cardio
+  specificite=true_negative/(true_negative+false_positive)
+  
+  #la f-measure est utilise en machine learning, prend en compte la mesure des deux types d'erreur possibles
+
+  #fausse detection d'effet ou non detection de l'effet
+  F_measure=(precision*sensibilite*2)/(precision+sensibilite)
+  
+  statistiques_generales=list(table_contingence=table_contingence,accuracy=accuracy,sensibilite=sensibilite,specificite=specificite,F_measure=F_measure,precisionH1=precision_H1,precisionH0=precision_H0,moyenne_biais_H0=moyenne_biais_H0,moyenne_biais_H1=moyenne_biais_H1,precision=precision)
+  
+  return(statistiques_generales)
+}
+
+creation_table_puissance(nb_simulations=10,a_priori = data,nb_personne_par_simulation=2000)
+@
+
+\section {Comparaison entre le modèle hiérarchique et le modèle non hiérarchique}
+Pour l'étude de l'effet du choix de la variance ou de la taille du bras sur la précision des paramètres en sortie, on se référera à l'étude auparavant réalisée par nos collègues. Nous allons donc fixer dans toute notre étude le nombre de patients dans chaque bras à 1000 et la variance à 0.2, valeur précédemment estimée à l'aide des données a priori. De plus, puisque dans le modèle non hiérarchique, on inclut directement la distribution a priori, on fera ici de même pur le modèle hiérarchique afin d'avoir un réel élément de comparaison. \\
+Pour cela, on va utiliser 6 critères différents:
+\begin {itemize}
+\item Le risque de première espèce. C'est la probabilité de se tromper et d'affirmer que l'on est sous $ H_{1}$, alors qu'en réalité on est sous $ H_{0}$. Autrement dit, c'est la probabilté de considérer que les traitements ont le même effet sur le taux d'incidence des maladies alors qu'en réalité, les traitements sont significativement différents. La \textbf {sensibilité} n'est autre qu'une mesure de la capacité du modèle à détecter une différence significative lorsqu'elle existe. Elle est égale à $ 1-\alpha$. Ce critère est essentiel, et justifie la forme atypique des hypothèses du test. En effet, si on se trompe sur cette hypothèse, on peut éventuellement conclure à l'absence d'effet du traitement sur le taux d'incidence, avec des conséquences graves. On pourrait en effet distribuer un traitement qui s'avère finalement plus dangereux que l'ancien en termes de bénéfice/risque et éventuellement conduisant à une surmortalité au sein de notre population traitée. Celle-ci, lié au relativement haut temps moyen d'apparition de la maladie ne pourrait bien être détectée que des années après le début du traitement. En effet, la moyenne d'une loi exponentielle est de $ \dfrac {1}{\theta}$, une augmentation de $ \theta$ impliquerait donc une diminution de ce temps moyen et in fine, une apparition plus rapide et importante du nombre de maladies cardiovasculaires. Généralement, en statistiques, on considère un seuil de 5 \% pour réfuter une hypothèse (même si dans le domaine de la santé, où les conséquences sont éventuellement plus importantes, on tend à diminuer ce dernier). De plus, avec les chaines mcmc, nous avons la distribution réelle de la densité de probabilité de $ \theta$. On calcule alors le quantile à 95 \%: si ce dernier est inférieure à 1.3 c'est que la probabilité que $ \theta$ soit inférieure 1.3 est supérieure à 95 $ \%$ ou autrement dit la probabilité d'être sous $ H_{0}$ est inférieure au seuil de conservation de $ 5\%$. Dans ce cas on réfute $ H_{0}$ alors qu'on est bien sous $H_{0}$, on est donc en présence d'un faux négatif. Le risque de première espèce se détermine donc ainsi: $ puissance= \dfrac {true postive}{nombre total d'experiences sous h0}$
+
+
+\item La puissance ou spécificité. C'est la capacité à détecter que l'on est sous $ H_{0}$ alors qu'en réalité on est bien sous $ H_{0}$. Autrement dit, elle reflète la capacité de notre modèle à détecter lorsque les traitements sont siginifativent égaux en terme d'incidence des mladies alors qu'ils le sont réellement. Le risque de seconde espèce, nommé $ \beta$ correspond à 1-spécificité. Cette mesure a aussi son importance, puisqu'en la rejetant alors qu'elle est vraie, on pourrait potentiellement rejeter un nouveau traitement soulageant plus efficacement les malades, sous un prétexte erroné qu'elle augmenterait le taux d'incidence des maladies cardiovasculaires. Pour son calcul, on suit le même raisonnement que précédent: si le quantile à 95  \% est inférieure à 1.3, c'est que la probabilité d'être sous $H_{0}$ est inférieure à 5\%, on conclut donc à l''hypothèse $ H_{1}$. On est en présence d'un vrai négatif. Pour déterminer la puissance, il suffit de calculer le ratio suivant : $$ puissance= \dfrac {\text{true negative}}{\text {true negative + false positive}} \Leftrightarrow puissance= \dfrac {\text{true negative}}{\text {true negative + false positive}} $$. Plus le nombre de simulations sera importante, tous les autres paramètres étant fixés par ailleurs, plus notre calcul de puissance sera robuste. Pour illuster notre propos, cf graphique ci dessous.
 
 
 
 
+<<fig=True,echo=True>>=
+nb_simulations=10
+  for (i in seq (nb_simulations)) {
+    simulation=modele_hierarchique(nb_personne_par_simulation=200,h0=FALSE,a_priori=data) 
+    if (i==1) {
+      hazard_ratio_simule=simulation
+    }
+    else {
+      hazard_ratio_simule=cbind(hazard_ratio_simule,simulation)
+    }
+  }
+ 
+  quantile_95_H1=apply(hazard_ratio_simule,2,function(x) {quantile(x,probs=0.95)})
+  indices <- which(quantile_95_H1<1.3)
+  for (indice in indices) {
+    hist(hazard_ratio_simule[,indice],main="distribution de probabilité du hazard ratio",freq = FALSE,xlab="hazard ratio")
+    abline(v=1.3,col="red")
+    
+    print( paste("la probabilite de se tromper est egale a ",toString(sum(hazard_ratio_simule[,indice]>1.3)/nrow(hazard_ratio_simule))))
+    }
+@
 
+
+
+\item L'accuray, plutôt utilisée en machine learning, mesure le nombre de bonnes détections sur le nombre total de simulations. Elle traduit donc la probabilité, toutes hypothèses confondues, que le modèle détermine la bonne hypothèse.
+
+\item On peut aussi trouver la f-measure, qui combine la sensibilité avec un critère nommé précision en data mining (à ne pas confondre avec la précision décrite ci après). Elle se mesure ainsi: $$ F-measure= \dfrac {precision*sensibilite*2}{precision+sensibilite}$$, et est une mesure de la qualité globale de notre modèle à détecter les expériences sous $ H_{0}$, sans en ajouter.
+
+\item La précision, ici au sens statistique, est le logarithme de la largeur de l'intervalle à 95 \% de notre paramètre $ \gamma$.  Pour cela, on détermine la largeur de cet intervalle pour chaque simulation, et on récupére la médiane de toutes les simulations. Plus la précision est faible, plus la largeur de l'intervalle est faible, donc plus on se ressere autour de la vraie valeur du hazard ratio, et plus les risques de première ou seconde espèce sont réduits.
+
+\item Le biais est l'écart logarithmique médian attendu entre la valeur prédite (au sens médian) par notre modèle et la valeur attendue se lon notre hypothèse. Plus ce biais est faible, meilleur est notre modèle, puisque fidèle à la réalité.
+
+\item La justesse d'un modèle, que l'on ne détermine pas directement est une combinaison de la précision et du biais. Si est on est précis (faible largeur de l'intervalle) et fidèle, alors meilleur et plus juste est notre modèle, et plus les chances d'aboutir à une conclusion correcte sont importantes. 
+
+\end {itemize}
+
+
+Voici les résultats obtenus avec 1 000 simulations, pour n=200 personnes puis n=1 500 personnes.
+<<echo=False>>=
+creation_table_puissance(fonction=modele_hierarchique,nb_personne_par_simulation=200,nb_simulations=1000,a_priori=data) 
+print("resultats obtenus pour 200 personnes avec le modèle hiérarchique") 
+creation_table_puissance(fonction=modele_hierarchique,nb_personne_par_simulation=1500,nb_simulations=1000,a_priori=data) 
+print("resultats obtenus pour 1500 personnes avec le modèle hiérarchique") 
+creation_table_puissance(fonction=modele_non_hierarchique,nb_personne_par_simulation=200,nb_simulations=1000) 
+print("resultats obtenus pour 200 personnes avec le modèle non hiérarchique") 
+creation_table_puissance(fonction=modele_non_hierarchique,nb_personne_par_simulation=1500,nb_simulations=1000) 
+print("resultats obtenus pour 1500 personnes avec le modèle non hiérarchique") 
+@
+
+
+On voit notamment que selon les différents critères de distinction d'un modèle, nos choix vont se porter sur le modèle hiérarchique. Il présente notamment un écart moyen avec la valeur recherchée plus faible, une largeur de l'intervalle moins importante conduisant à une sensibilité et spécificté globalement meilleure. Cela peut s'expliquer notamment par le fait que dans un modèle non hiérarchique, l'essentiel de l'information est apportée par les données a priori et ne prend pas en compte les éventuelles spécificités de notre étude. Dans le même temps, avec un modèle hiérarchique, toutes les études sont au même niveau (auparavant le grand nombre de patients étudiés restreignait beaucoup les possibilités de variation de notre étude), ce qui nous permet de mieux prendre en compte la variabilité de réaction au traitement de référence, et donc d'avoir in fine une meilleure estimation de notre hazard ratio. On va donc plutôt porter nos choix sur un modèle hiérarchique pour mener une étude de puissance, ce dernier réduisant un peu plus les risques de première et seconde espèce. 
+
+
+
+Une autre façon de le voir est de faire tourner les deux modèles à vide, et de comparer la distribution a priori avec la distribution a posteriori.
+<<echo=False>>=
+
+par(mfrow = c(1, 2))
+mcmctot=modele_non_hierarchique(a_vide = FALSE,nb_personne_par_simulation=200,type="logteta") 
+mcmctot0=modele_non_hierarchique(a_vide = TRUE,nb_personne_par_simulation=200,type="logteta") 
+hist(mcmctot[,1], main = "Comparaison distribtution a priori et a posterio du HR avec le modèle non hiérarchique", xlab = "logteta",xlim=c(-5,-3), freq = FALSE)
+lines(density(mcmctot0[,1]), col = "blue", lwd = 2)
+
+
+
+mcmctot=modele_hierarchique(nb_personne_par_simulation=200,a_priori=data,sigma=0.2,type="logteta") 
+mcmctot0=modele_hierarchique(nb_personne_par_simulation=200,a_priori=data,sigma=0.2,type="logteta",a_vide = TRUE) 
+hist(mcmctot[,6], main = "Comparaison distribtution a priori et a posterio du HR avec le modèle hiérarchique", xlab = "logteta",xlim=c(-5,-3), freq = FALSE)
+lines(density(mcmctot0[,6]), col = "blue", lwd = 2)
+   
+
+
+@
+
+Les chaînes MCMC peuvent enfin être utilisées dans R pour simuler la distribution prédictive des données et construire ainsi des graphes appropriés à chaque cas pour visualiser la qualité d’ajustement du modèle aux données, en comparant les valeurs prédites par le modèle avec les valeurs observées. 
+
+
+
+
+<<validation_modele_non hierarchique,fig=TRUE,echo=False>>=
+#stockage des effectifs observes
+nb_simulations=100
+effectif_observe=c()
+theta_obs=c()
+for (i in seq (1,nb_simulations)) {
+  simulation=simulation_clinique(h0=TRUE,n=1000,temps_administratif=3.0)
+  effectif_bras_traitement=tapply(simulation$event,simulation$etude,function(x) {sum(x==1)})
+  effectif_observe=c(effectif_observe,effectif_bras_traitement)
+  theta_obs=c(theta_obs,c(1,1.3))
+  
+}
+
+effectif_observe=as.numeric(effectif_observe)
+
+
+prediction des effectifs
+#stockage des quantiles `a 2.5, 50 et 97.5 %
+ patients_predits=c()
+qinf <- c();qsup <- c()
+ theta_simule=c(1,1.3)
+ for (j in seq(1,2)) {
+   for (i in 1:nb_simulations) {
+     if (j==1) {
+       teta_distribution=modele_non_hierarchique(nb_personne_par_simulation=1000,h0=FALSE,type="teta")[,1]
+
+     }
+     else {
+       teta_distribution=modele_non_hierarchique(nb_personne_par_simulation=1000,h0=TRUE,type="teta")[,2]
+     }
+   teta_predit=quantile(teta_distribution,0.5)
+   #simulation temps attente patients
+   temps_patients=rexp(1000,teta_predit)
+   #on suppose un temps moyen d'oberservation de 2.5 ans
+   nb_patients_malades=sum(temps_patients<2.5)
+   patients_predits=c(patients_predits,nb_patients_malades)
+   }
+   qinf=c(qinf,quantile(patients_predits,0.025));qsup=c(qsup,quantile(patients_predits,0.975))
+ }
+ #representation graphique
+ par(mfrow = c(1, 1))
+ print(qinf)
+ print(qsup)
+ plot(effectif_observe ~ theta_obs,  pch = 16, xlab = "taux d'incidence",
+ ylab = "nombre de patients malades a la cesure",main="validation du modele par comparaison avec les donnees observées",ylim=c(0,100))
+ for (i in 1:2) {
+ segments(theta_simule[i], qinf[i], theta_simule[i], qsup[i], col = "red", lwd = 2)
+ }
+
+
+
+#avec modele hierarchique
+effectif_observe=c()
+theta_obs=c()
+for (i in seq (1,nb_simulations)) {
+  simulation=simulation_clinique(h0=TRUE,n=1000,temps_administratif=3.0)
+  effectif_bras_traitement=tapply(simulation$event,simulation$etude,function(x) {sum(x==1)})
+  effectif_observe=c(effectif_observe,effectif_bras_traitement)
+  theta_obs=c(theta_obs,c(1,1.3))
+}
+
+effectif_observe=as.numeric(effectif_observe)
+#prediction des effectifs
+##stockage des quantiles `a 2.5, 50 et 97.5 %
+patients_predits=c()
+qinf <- c();qsup <- c()
+theta_simule=c(1,1.3)
+for (j in seq(1,2)) {
+  for (i in 1:nb_simulations) {
+    if (j==1) {
+      teta_distribution=modele_hierarchique(nb_personne_par_simulation=1000,h0=FALSE,type="teta",a_priori = data)[,6]
+      print(head(teta_distribution))
+     
+    }
+    else {
+      teta_distribution=modele_hierarchique(nb_personne_par_simulation=1000,h0=TRUE,type="teta",a_priori = data)[,7]
+    }
+  teta_predit=quantile(teta_distribution,0.5)
+  #simulation temps attente patients
+  temps_patients=rexp(1000,teta_predit)
+  #on suppose un temps moyen d'oberservation de 2.5 ans
+  nb_patients_malades=sum(temps_patients<2.5)
+  patients_predits=c(patients_predits,nb_patients_malades)
+  }
+  qinf=c(qinf,quantile(patients_predits,0.025));qsup=c(qsup,quantile(patients_predits,0.975))
+}
+
+
+#representation graphique
+par(mfrow = c(1, 1))
+print(qinf)
+print(qsup)
+plot(effectif_observe ~ theta_obs,  pch = 16, xlab = "taux d'incidence",
+ylab = "nombre de patients malades a la cesure",main="validation du modele par comparaison avec les donnees observées",ylim=c(0,100))
+for (i in 1:2) {
+segments(theta_simule[i], qinf[i], theta_simule[i], qsup[i], col = "red", lwd = 2)
+}
+
+
+
+@
+
+
+Comme par exemple dans la simulation ci dessus, où l'on va chercher à comparer les valeurs prédites des effectifs pour un nombre important de simulations avec les valeurs observées.
 
 
 \end{document}
